@@ -693,19 +693,11 @@
 
 <script>
 
-const SYSTEM_PROMPT = `Você é a B13L.IA, uma IA multimodal de elite. 
-Sua missão é ser o braço direito do Gabriel em código, análise de mídia e informações estratégicas.
+const SUPABASE_URL = "https://vozujvgmippolcmvqksb.supabase.co";
+const SUPABASE_FUNCTION_URL = `${SUPABASE_URL}/functions/v1/b13l-proxy`;
 
-SOBRE BUSCAS EM TEMPO REAL:
-1. Se o Gabriel pedir informações sobre jogos de futebol, notícias, clima ou qualquer fato atual, USE a ferramenta 'google_search' imediatamente.
-2. É PROIBIDO responder com frases de confirmação como "Vou consultar", "Deixa eu ver" ou "Acessando o log". Você deve ir direto para a busca e retornar o resultado final.
-3. Se a busca falhar por cota, aí sim você sugere o uso de APIs externas (como API-Football).
-4. Sempre formate calendários de jogos em tabelas Markdown organizadas, incluindo Horário (Brasília) e Onde Assistir.
-
-CAPACIDADES GERAIS:
-- Você vê imagens e vídeos (análise técnica).
-- Você gera códigos complexos (Tizen, Android, Web, Supabase).
-- Linguagem: Direta, técnica, com gírias de dev ("tá no log", "deploy aceito", "push realizado").`;
+// ADICIONE ESTA LINHA:
+const SYSTEM_PROMPT = "Você é a B13L.IA, uma inteligência artificial avançada focada em programação e tecnologia. Seja prestativa, use termos técnicos quando apropriado e mantenha um tom cyberpunk/futurista.";
 
 let conversationHistory = [];
 let pendingImages = []; // [{base64, mediaType, name}]
@@ -796,8 +788,7 @@ function addMessage(role, content, imageDataUrls = []) {
     imageHTML = imageDataUrls.map(url => `<img class="msg-image" src="${url}" alt="imagem enviada">`).join('');
   }
 
-  // A MÁGICA ACONTECE AQUI: 
-  // O 'marked.parse' transforma o Markdown da IA em HTML formatado com blocos de código
+  // Usando Marked para o assistente e texto puro para o usuário
   const formattedContent = role === 'assistant' ? marked.parse(content) : content;
 
   div.innerHTML = `
@@ -847,10 +838,79 @@ function addTyping() {
   container.scrollTop = container.scrollHeight;
 }
 
+
+async function gerarMidiaHF(promptText) {
+  const container = document.getElementById('chat-container');
+  const typingDiv = document.createElement('div');
+  typingDiv.className = 'message assistant';
+  typingDiv.id = 'rendering-msg';
+  typingDiv.innerHTML = `
+    <div class="msg-avatar">IA</div>
+    <div>
+      <div class="msg-sender">B13L.IA (Engine Gráfica)</div>
+      <div class="msg-bubble">
+        <div class="typing-indicator"><span></span><span></span><span></span></div>
+        <div style="font-family: 'Share Tech Mono'; font-size: 10px; color: var(--neon2); margin-top: 5px;">
+          > ACESSANDO NÚCLEO SUPABASE... <br>
+          > RENDERIZANDO VIA HUGGING FACE...
+        </div>
+      </div>
+    </div>`;
+  container.appendChild(typingDiv);
+  container.scrollTop = container.scrollHeight;
+
+  try {
+    const response = await fetch(SUPABASE_FUNCTION_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ 
+        type: 'image', 
+        payload: promptText 
+      })
+    });
+
+    if (!response.ok) throw new Error("Falha na comunicação com o servidor.");
+
+    const blob = await response.blob();
+    const imageUrl = URL.createObjectURL(blob);
+    
+    document.getElementById('rendering-msg')?.remove();
+    
+    const div = document.createElement('div');
+    div.className = 'message assistant';
+    div.innerHTML = `
+      <div class="msg-avatar">IA</div>
+      <div>
+        <div class="msg-sender">B13L.IA (Mídia Gerada)</div>
+        <div class="msg-bubble">
+          > RENDERIZAÇÃO CONCLUÍDA COM SUCESSO. <br>
+          <img src="${imageUrl}" style="max-width: 100%; border-radius: 8px; margin-top: 10px; border: 1px solid var(--neon2); box-shadow: 0 0 15px rgba(0,207,255,0.3);">
+          <br><a href="${imageUrl}" download="b13l-ia-image.png" style="color: var(--neon2); font-size: 10px; text-decoration: none; display: block; margin-top: 5px;">[ BAIXAR ARQUIVO ]</a>
+        </div>
+      </div>`;
+    container.appendChild(div);
+    container.scrollTop = container.scrollHeight;
+    
+  } catch (error) {
+    document.getElementById('rendering-msg')?.remove();
+    addMessage('assistant', `<span class="error-msg">FALHA NO MOTOR GRÁFICO: ${error.message}</span>`);
+  }
+}
+
+
 async function sendMessage() {
   const input = document.getElementById('user-input');
   const text = input.value.trim();
   if (!text && pendingImages.length === 0) return;
+
+  // Intercepta comando de imagem
+  if (text.toLowerCase().startsWith("/gerar")) {
+    const promptVisual = text.replace("/gerar", "").trim();
+    addMessage('user', text);
+    input.value = '';
+    await gerarMidiaHF(promptVisual);
+    return;
+  }
 
   const btn = document.getElementById('send-btn');
   btn.disabled = true;
@@ -864,66 +924,46 @@ async function sendMessage() {
   input.value = '';
   input.style.height = 'auto';
 
-  let currentParts = [];
-  if (text) currentParts.push({ text: text });
+  let currentParts = [{ text: text || "" }];
   imagesToSend.forEach(img => {
-    currentParts.push({
-      inlineData: { mimeType: img.mediaType, data: img.base64 }
-    });
+    currentParts.push({ inlineData: { mimeType: img.mediaType, data: img.base64 } });
   });
 
   conversationHistory.push({ role: 'user', parts: currentParts });
   addTyping();
 
-try {
-    const API_KEY = "AIzaSyAYyMVsXFw6ol2gmYEklalPB18w3vRHLb8"; 
-    const MODEL = "gemini-2.5-flash"; 
-    const URL = `https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent?key=${API_KEY}`;
-
-    const payload = {
-        contents: conversationHistory,
-        system_instruction: { parts: [{ text: SYSTEM_PROMPT }] },
-        tools: [{ google_search: {} }]
-    };
-
-    const response = await fetch(URL, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
+  try {
+    const response = await fetch(SUPABASE_FUNCTION_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        type: 'text',
+        payload: {
+          contents: conversationHistory,
+          // O Prompt do Sistema pode ser enviado aqui ou fixado na Edge Function
+          system_instruction: { parts: [{ text: SYSTEM_PROMPT }] },
+          tools: [{ google_search: {} }]
+        }
+      })
     });
 
     const data = await response.json();
 
-    // SE O GEMINI FALHAR (ERRO DE COTA OU DEMANDA)
-    if (data.error) {
-        console.warn("Gemini offline. Tentando DeepSeek...");
-        const backupReply = await enviarParaDeepSeek(text); // Chama o DeepSeek
-        
-        document.getElementById('typing-msg')?.remove();
-        conversationHistory.push({ role: 'model', parts: [{ text: backupReply }] });
-        addMessage('assistant', `> MODO DE SEGURANÇA ATIVADO (DEEPSEEK) <\n\n${backupReply}`);
-    } 
-    // SE O GEMINI RESPONDER NORMALMENTE
-    else if (data.candidates && data.candidates[0].content) {
-        document.getElementById('typing-msg')?.remove();
-        const reply = data.candidates[0].content.parts[0].text;
-        conversationHistory.push({ role: 'model', parts: [{ text: reply }] });
-        addMessage('assistant', reply);
+    if (data.error) throw new Error(data.error.message || data.error);
+
+    document.getElementById('typing-msg')?.remove();
+    
+    if (data.candidates && data.candidates[0].content) {
+      const reply = data.candidates[0].content.parts[0].text;
+      conversationHistory.push({ role: 'model', parts: [{ text: reply }] });
+      addMessage('assistant', reply);
     }
 
-} catch (err) {
-    // SE O FETCH DO GEMINI DER ERRO DE CONEXÃO, TENTA O DEEPSEEK TAMBÉM
-    console.error("Erro no Gemini, tentando DeepSeek...", err);
-    try {
-        const backupReply = await enviarParaDeepSeek(text);
-        document.getElementById('typing-msg')?.remove();
-        conversationHistory.push({ role: 'model', parts: [{ text: backupReply }] });
-        addMessage('assistant', `> MODO DE SEGURANÇA ATIVADO (DEEPSEEK) <\n\n${backupReply}`);
-    } catch (deepError) {
-        document.getElementById('typing-msg')?.remove();
-        addMessage('assistant', `<span class="error-msg">ERRO CRÍTICO: Todos os sistemas offline.</span>`);
-    }
-}
+  } catch (err) {
+    console.error("Erro na conexão Supabase:", err);
+    document.getElementById('typing-msg')?.remove();
+    addMessage('assistant', `<span class="error-msg">SISTEMA OFFLINE: ${err.message}</span>`);
+  }
 
   btn.disabled = false;
   input.focus();
